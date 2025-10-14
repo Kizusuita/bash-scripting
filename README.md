@@ -1,1 +1,1 @@
-Enthusiast of Linux systems and shell scripting. I spend my free time writing Bash scripts to automate workflows and broaden my understanding of system operations :)
+Scripts for automation of system administrator tasks
