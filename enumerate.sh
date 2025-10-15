@@ -95,7 +95,12 @@ for (( i=0; i<${#raw[@]}; i++ )); do
 	
 	host_first=$(( network_int + 1 ))
 	host_last=$(( broadcast_int - 1 ))
+
+	{
+
 	
+
+	} | xargs -P50 -I{} bash -c 'is_alive "$1" && echo "Alive: $1"' {}
 
 done
 
