@@ -1,6 +1,6 @@
 #!/bin/bash
 
-declare -a raw
+declare -a iface
 declare -a ifaces
 IFS=' '
 
@@ -13,42 +13,45 @@ cidr_to_netmask() {
 
 	for ((i=0; i<4; i++)); do
 		if ((i < full_octets)); then
-			mask+=255
+			mask+="255"
 		elif ((i == full_octets)); then
 			mask+=$(( 256 - 2**(8 - remainder) )) #Handles partial mask portion
 		else
-			mask+=0
+			mask+="0"
 		fi
-	
-		[[ $i -lt 3 ]] && mask+=. #This just adds the . between the octets, because every 3rd iteration you'd add a dot
+
+		[[ $i -lt 3 ]] && mask+="." #This just adds the . between the octets, because every 3rd iteration you'd add a dot
 	done
-	
-    echo "$mask"
+
+	echo "$mask"
 }
 
-mapfile -t ifaces < <(ip -o link show | awk -F': ' '{print $2}') #Print 2nd output field, IPaddr
+mapfile -t ifaces < <(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$') #Print 2nd output field, IPaddr, skip loopback
 
 i=0
 
-for iface in "${ifaces[@]}"; do
-	state=$(ip link show "$iface" | awk '/state/ {print $9}') #State, print 9th field
-	mac=$(ip -o link show "$iface" | awk '{print $17}') #I just did -o so it'sa bit cleaner and reliable output
+# Use an indexed array to store the interface data
+declare -a iface
 
-	ip_info=$(ip -o -4 addr show "$iface" | awk '{print $4}') #-o = One line, -4 = only IPv4, print 4th field
-    
-	if [[ -n $ip_info ]]; then
-		cidr=${ip_info#*/} #This takes the substring and prints only after the /, aka the cidr notation
+for iface_name in "${ifaces[@]}"; do
+	state=$(ip link show "$iface_name" | awk '/state/ {print $9}') #State, print 9th field
+	mac=$(ip -o link show "$iface_name" | awk '{print $17}') #MAC address
+	ip=$(ip -o -4 addr show "$iface_name" | awk '{print $4}') #-o = One line, -4 = only IPv4, print 4th field
+
+	if [[ -n $ip && "$ip" =~ / ]]; then
+		cidr=${ip#*/}
 		mask=$(cidr_to_netmask "$cidr")
 	else
 		ip="none"
 		mask="none"
 	fi
-	
-	declare -a "iface_$i=( $iface $state $mac $ip $mask )"
+
+	iface[$i]="$iface_name|$state|$mac|$ip|$mask" #The way I was doing it is wrong because it won't store a list in a single array element. I'm just storing it as a single string and then storing it later by splitting it at the delimiter.
+
 	i=$((i+1))
 done
 
-#Get network subnet details & Ping
+#-------- Get network subnet details & Ping
 ip_to_int() {
 	local IFS=.
 	read -r i1 i2 i3 i4 <<< "$1"
@@ -56,50 +59,66 @@ ip_to_int() {
 }
 
 int_to_ip() {
-    local ip=$1
-    echo "$(( (ip >> 24) & 255 )).$(( (ip >> 16) & 255 )).$(( (ip >> 8) & 255 )).$(( ip & 255 ))"
+	local ip=$1
+	echo "$(( (ip >> 24) & 255 )).$(( (ip >> 16) & 255 )).$(( (ip >> 8) & 255 )).$(( ip & 255 ))"
 }
 
 is_alive(){
-	ping -c 1 -W 1 "$1" > /dev/null 2>&1 #The 2>&1 makes it have no output, redirection
-	return $? #$? is a special character, that returns the exit code of the previous cmd exe
+	ping -c 1 -W 1 "$1"  > /dev/null 2>&1
+	return $? #Return exit code of previous command
 }
 
-export -f is_alive int_to_ip #This is so my subshells can process these functions later.
+#--- For my subshells later ---
+export -f is_alive
+export -f int_to_ip
+#------------------------------
 
-for (( i=0; i<${#raw[@]}; i++ )); do #Len of raw so it counts all addresses it found in the beginning
-	ip_var="iface_${i}[3]"
-	mask_var="iface_${i}[4]"
-    
-	ip="${!ip_var}" #I have to write it like this so I can expand the VALUE of ip_var as a variable name, then expand that variable. If I don't, it's a "bad subsitution" error because bash doesn't handle stuff like "${iface_$1[0]}" correctly.
-	mask="${!mask_var}"
+for (( i=0; i<${#iface[@]}; i++ )); do
+	IFS='|' read -r name state mac ip mask <<< "${iface[$i]}"
 
 	ip_int=$(ip_to_int "$ip")
 	mask_int=$(ip_to_int "$mask")
 
 	network_int=$(( ip_int & mask_int ))
-	broadcast_int=$(( network_int | (~mask_int & 0xFFFFFFFF) )) #OR so it returns the numbers in layman's terms added together, putting the 1's in the binary rep where the 0's were, NOT mask_int, so all host bits are turned on (aka broadcast id), and then the 0xFFFFFFFF keeps it within 32bits rather than 64bits
-	
+	broadcast_int=$(( network_int | (~mask_int & 0xFFFFFFFF) )) #Broadcast address
+
 	network=$(int_to_ip "$network_int")
 	broadcast=$(int_to_ip "$broadcast_int")
-
-    	declare -a "network_details_$i=('$ip' '$mask' '$network' '$broadcast')"
 
 	host_first=$(( network_int + 1 ))
 	host_last=$(( broadcast_int - 1 ))
 
-	> sweep.txt #Clear the file every time the program is run
+	use_range_1=$(int_to_ip host_first)
+	use_range_2=$(int_to_ip host_last)
+
+	#stupid array index access bullshit >:(
+	network_details[$i]="$ip|$mask|$network|$broadcast"
+
+	printf "Interface %s:\n  Name: %s\n  IP: %s\n  Mask: %s\n  Network ID: %s\n  Broadcast Addr: %s\n  Useable Range: %s - %s\n\n" "$((i + 1))" "$name" "$ip" "$mask" "$network" "$broadcast" "$use_range_1" "$use_range_2"
 
 	{
+		for ((ip_int = host_first; ip_int <= host_last; ip_int++)); do
+			int_to_ip "$ip_int"
+		done
+	} | xargs -P10 -I{} bash -c 'is_alive "$0" && "echo Alive: $0"' {}
 
-	for ((ip_int = host_first; ip_int <= host_last; ip_int++)); do
-        int_to_ip "$ip_int" #Change ip to int to give to alive to ping, adding 1 to end
-    done
-
-	} | xargs -P100 -I{} bash -c 'is_alive "$0" && flock output.txt -c "echo Alive: $0 >> sweep.txt"' {}
 done
 
+#-------------- Above here works for sure. --------------
+
 :<<'note'
+	> sweep.txt #Clear the file every time
+
+	{
+		for ((ip_int = host_first; ip_int <= host_last; ip_int++)); do
+			int_to_ip "$ip_int" #Convert int to IP
+		done
+	} | xargs -P10 -I{} bash -c 'is_alive "$0" && flock output.txt -c "echo Alive: $0"' {}
+
+done
+
+
+
 I'm just gonna make this a whole note so I don't have another giant comment in the middle of my code. Explanation of xargs: The command itself takes input (normally file/pipe), makes commands from that and then executes them. It's sorta like a bridge between the data itself and the action execution of the code. a.k.a., it takes a list of things and runs a command on each of them. Why do this instead of just running each piece in a loop?... well because it handles long lists, spaces, quotes, etc. including parallelism a lot more safely and nicely. And I want to be able to use this code on big networks if I want, so.... very long lists.
 
 The 0 is needed instead of the 1 because of how bash -c works. Bash -c is being passed a script string, which is "$0". The {} becomes the script string, or rather the above { for; do done } is the script string, and that's what it's being passed. The output from the is put into $0, instead of $1 like a "normal" arugment in the parent shell. Normally you only have 1 arg for xargs too, so it's typically always $0 when calling the output from your script string.
@@ -114,7 +133,7 @@ The flags mean as follows:
 & Run them in the background
 
 xargs -P50 -I{} bash -c 'is_alive "$1" && echo "Alive: $1"' {}
-note
+
 
 #Scan alive hosts
 
@@ -180,7 +199,7 @@ cat sweep.txt | xargs -n1 -P5 -I{} bash -c 'scan_host "$0"' {}
 echo "All scans completed. Results in $scan_dir/, summary in $summary."
 
 #testing
-for (( i=0; i<${#raw[@]}; i++ )); do
+for (( i=0; i<${#iface[@]}; i++ )); do
 	details_var="network_details_${i}[@]"
 	details=("${!details_var}") #The inside of this is called an "indirect expansion". In order to assign EACH ELEMENT of this array to the elements of the details array, you need to tell bash by the (), which lowkey just means create an array. Without it, you just get a string assigned to details[0]. Same applies to above, but it doesn't need the () because I'm not passing a whole array, I'm just passing a single element.
 	echo "IP: ${details[0]}"
@@ -188,6 +207,6 @@ for (( i=0; i<${#raw[@]}; i++ )); do
 	echo "Network: ${details[2]}"
 	echo -e "Broadcast: ${details[3]}\n"
 done
+done
+note
 
-
-#printf "%s\n" "${raw[@]}"
