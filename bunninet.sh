@@ -203,7 +203,14 @@ scan_host() {
 		[[ -z "$filtered_ports" ]] && filtered_ports="none"
 	fi
 
-	printf '[%s]: Host:%s ---> OPEN:%s\tFILTERED:%s\n' "$ts" "$host" "$open_ports" "$filtered_ports" >> "$summary_csv"
+	#Parse host IP and OS info from grepable output
+	local host_ip os_name
+	host_ip=$(awk '/^Host: /{print $2; exit}' "$out_gnmap") #Takes the first field after 'Host:' which is the IP address
+	os_name=$(awk -F'OS: ' '/OS: /{print $2; exit}' "$out_gnmap") #Takes the text after 'OS:' if OS detection was successful
+	[[ -z "$os_name" ]] && os_name="Unknown OS" #If OS detection failed or wasn't run, mark it as Unknown OS
+
+	#Print summary line with host IP and OS info included
+	printf '[%s]: Host:%s (%s) ---> OS:%s  OPEN:%s  FILTERED:%s\n' "$ts" "$host" "$host_ip" "$os_name" "$open_ports" "$filtered_ports" >> "$summary_csv"
 }
 
 export -f scan_host
