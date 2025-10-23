@@ -4,11 +4,11 @@ declare -a iface
 declare -a ifaces
 IFS=' '
 
-echo "\t\t╭─●────●────●─────────────●────●─╮"
-echo "\t\t│   (\_/)                        ●│"
-echo "\t\t|  ( •_• )   Bunn1N37          ──┤│"
-echo "\t\t│  /    >  5n34k1ng 7hr0ugh n37s. │"
-echo "\t\t╰─●────●────●─────────────●────●─╯"
+echo "    ╭─●────●────●─────────────●────●─╮"
+echo "    │   (\_/)                        ●│"
+echo "    |  ( •_• )   Bunn1N37          ──┤│"
+echo "    │  /    >  5n34k1ng 7hr0ugh n37s. │"
+echo "    ╰─●────●────●─────────────●────●─╯"
 echo ""
 echo -e "Welcome to Bunn1N37, a ping sweeper and port scanner. Please wait while Network Details are collected.\n"
 
@@ -156,7 +156,7 @@ ports="1-1024" #Change as needed
 timing="-T2" #Less likely to trigger IDS/IPS thresholds, change as desired but it'll be louder
 scan_delay="100ms" #Forces delay between probes so it's less traffic created
 max_retries=2 #The more this is, the more network traffic you'll create
-args="-sT $timing --scan-delay $scan_delay --max-retries $max_retries -p $ports -oG -" #-sT so I can run without root, -oG so it's greppable
+args="-sT $timing --scan-delay $scan_delay --max-retries $max_retries -p $ports " #-sT so I can run without root, -oG so it's greppable
 
 summary_csv="scan_summary.csv"
 combined_gnmap="all_hosts.gnmap"
@@ -177,11 +177,10 @@ scan_host() {
 	ts=$(date -u +'%F_%T')
 
 	local out_gnmap="${host}.gnmap" #Grepable so I can organize the data later in the summary, standardized in contrast to human readable
-	local out_txt="${host}.nmap.txt"
 	local err_file="/tmp/nmap_${host}.stderr" #I feed the error to here, so they don't append into the summary
 
 	#Run nmap once --> send grepable and human-readable outputs to per-host files
-	if ! nmap "${nmap_args[@]}" -oG "$out_gnmap" -oN "$out_txt" "$host" > /dev/null 2> "$err_file"; then #The /dev/null will make nmap not have any output in terminal :) And the ! is a neat little way to write if command failed instead of writing both if then else.
+	if ! nmap "${nmap_args[@]}" -oG "$out_gnmap" "$host" > /dev/null 2> "$err_file"; then #The /dev/null will make nmap not have any output in terminal :) And the ! is a neat little way to write if command failed instead of writing both if then else.
 		echo "nmap failed for $host (see $err_file)" >&2
 		return 1
 	fi
@@ -214,7 +213,7 @@ cat $sweep_txt | xargs -P5 -I{} bash -c 'scan_host "$1" && echo "Host scans comp
 
 cat $network_txt >> "$summary_csv"
 
-rm -f ./*.gnmap ./*.nmap.txt "./$network_txt" "./$sweep_txt"
+rm -f ./*.gnmap "./$network_txt" "./$sweep_txt"
 rm -f /tmp/nmap_*.stderr
 
 echo -e "\nAll scans completed!~ All details can be found in ./scan_summary.csv"
