@@ -12,6 +12,7 @@ if [[ -z $# ]]; then
     exit 1
 fi
 
+system_type=$(grep "ID=" /etc/os-release)
 
 case "$1" in
     "-c"|"--cpu")
@@ -21,7 +22,7 @@ case "$1" in
 
         declare -a mem_usage
         declare -a lines
-        mapfile -t mem_usage < <(smemstat -m | sort -n -k 2 | awk '{print $2}' | grep -E '[[:digit:]]')
+        mapfile -t mem_usage < <(smemstat -m | sort -n -k 2 | awk '{print $2}' | grep -E '[[:digit:]]') #figure this out later, no rh
         mapfile -t lines < <(smemstat -m | sort -n -k 2 | awk '{print $1, $2, $7}' | grep -v "Note")
 
         for (( i=0; i<${#mem_usage[@]}; i++ )); do
@@ -30,13 +31,20 @@ case "$1" in
                 printf '%s' lines[i]
             fi
         done
-        echo
 
-        echo -e "Hung Tasks:\n $(grep -i "hung task" /var/log/kern.log)\n"
+        h_tasks=$(dmesg | grep -i "hung task")
+
+        if [[ -z "$h_tasks" ]]; then
+            echo -e "Hung Tasks:\n None\n"
+        else
+            echo -e "Hung Tasks:\n $(h_tasks)\n"
+        fi
+
         exit;;
 
     "-d"|"--disk")
-        echo -e "I/O Errors: $(grep -iE "I/O error|bad block" /var/log/syslog)\n"
+        echo -e "I/O Errors:\n $(grep -i "I/O error" /var/log/messages)\n"
+
         if ! grep -i "No space left on device" /var/log/syslog; then
             echo "Disk full?: No"
         else
