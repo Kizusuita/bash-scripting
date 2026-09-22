@@ -1,1 +1,1 @@
-Enthusiast of Linux systems and shell scripting. I spend my free time writing Bash scripts to automate workflows and broaden my understanding of system operations :)
+These are basic learning scripts I've written to solve some practice problems on the website Exercism.io.
